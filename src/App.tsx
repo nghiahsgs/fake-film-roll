@@ -1,30 +1,25 @@
-import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { Camera, Download, ImagePlus, Sparkles, Trash2 } from 'lucide-react';
+import { ChangeEvent, useEffect, useRef, useState } from 'react';
+import { Camera, Download, ImagePlus, RefreshCw, Sparkles, X } from 'lucide-react';
 
-type FilmLook = 'kodak' | 'fuji' | 'mono' | 'disposable';
-type Layout = 'story' | 'square' | 'wide';
+type FilmLook = 'gold' | 'tokyo' | 'noir';
+type Template = 'cover' | 'strip' | 'contact';
 
-type Photo = {
-  id: string;
-  file: File;
-  url: string;
+type Photo = { id: string; url: string; name: string };
+
+const looks: Record<FilmLook, { name: string; bg: string; ink: string; wash: string; warm: string }> = {
+  gold: { name: 'Kodak summer', bg: '#ead2a2', ink: '#22170d', wash: 'rgba(255,184,74,.28)', warm: 'rgba(255,126,45,.16)' },
+  tokyo: { name: 'Tokyo night', bg: '#11131b', ink: '#f6ead9', wash: 'rgba(81,202,168,.22)', warm: 'rgba(255,64,129,.16)' },
+  noir: { name: 'Noir diary', bg: '#d9d2c4', ink: '#171513', wash: 'rgba(0,0,0,.18)', warm: 'rgba(255,255,255,.06)' },
 };
 
-const LOOKS: Record<FilmLook, { label: string; accent: string; temp: number; contrast: number; saturation: number }> = {
-  kodak: { label: 'Kodak Gold', accent: '#f6c04d', temp: 18, contrast: 1.09, saturation: 1.16 },
-  fuji: { label: 'Fuji Green', accent: '#41b77a', temp: -10, contrast: 1.04, saturation: 1.1 },
-  mono: { label: 'B&W 400TX', accent: '#e7e2d8', temp: 0, contrast: 1.22, saturation: 0 },
-  disposable: { label: 'Disposable', accent: '#ff6f91', temp: 28, contrast: 0.98, saturation: 1.28 },
+const templates: Record<Template, string> = {
+  cover: 'Instant cover',
+  strip: 'Film strip',
+  contact: 'Contact sheet',
 };
 
-const LAYOUTS: Record<Layout, { label: string; width: number; height: number }> = {
-  story: { label: 'Story 9:16', width: 1080, height: 1920 },
-  square: { label: 'Square', width: 1080, height: 1080 },
-  wide: { label: 'Wide post', width: 1600, height: 1000 },
-};
-
-function loadImage(src: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
+function image(src: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
     const img = new Image();
     img.onload = () => resolve(img);
     img.onerror = reject;
@@ -32,7 +27,7 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
-function roundedRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+function rr(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
   ctx.beginPath();
   ctx.moveTo(x + r, y);
   ctx.arcTo(x + w, y, x + w, y + h, r);
@@ -42,269 +37,210 @@ function roundedRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: num
   ctx.closePath();
 }
 
-function drawCover(ctx: CanvasRenderingContext2D, img: HTMLImageElement, x: number, y: number, w: number, h: number, look: FilmLook) {
-  const scale = Math.max(w / img.width, h / img.height);
-  const sw = w / scale;
-  const sh = h / scale;
-  const sx = (img.width - sw) / 2;
-  const sy = (img.height - sh) / 2;
+function cover(ctx: CanvasRenderingContext2D, img: HTMLImageElement, x: number, y: number, w: number, h: number) {
+  const s = Math.max(w / img.width, h / img.height);
+  const sw = w / s;
+  const sh = h / s;
+  ctx.drawImage(img, (img.width - sw) / 2, (img.height - sh) / 2, sw, sh, x, y, w, h);
+}
 
+function photoFrame(ctx: CanvasRenderingContext2D, img: HTMLImageElement, x: number, y: number, w: number, h: number, look: FilmLook, radius = 26) {
   ctx.save();
-  roundedRect(ctx, x, y, w, h, 18);
+  ctx.shadowColor = 'rgba(0,0,0,.38)';
+  ctx.shadowBlur = 40;
+  ctx.shadowOffsetY = 20;
+  rr(ctx, x, y, w, h, radius);
+  ctx.fillStyle = '#f8f0df';
+  ctx.fill();
+  ctx.shadowColor = 'transparent';
+  rr(ctx, x + 22, y + 22, w - 44, h - 72, radius - 8);
   ctx.clip();
-  ctx.drawImage(img, sx, sy, sw, sh, x, y, w, h);
+  cover(ctx, img, x + 22, y + 22, w - 44, h - 72);
+  ctx.globalCompositeOperation = look === 'noir' ? 'saturation' : 'soft-light';
+  ctx.fillStyle = looks[look].wash;
+  ctx.fillRect(x + 22, y + 22, w - 44, h - 72);
+  ctx.restore();
 
-  const cfg = LOOKS[look];
-  if (look === 'mono') {
-    ctx.globalCompositeOperation = 'saturation';
-    ctx.fillStyle = 'black';
-    ctx.fillRect(x, y, w, h);
-  } else {
-    ctx.globalCompositeOperation = 'soft-light';
-    ctx.fillStyle = cfg.temp > 0 ? `rgba(255, 184, 92, ${cfg.temp / 100})` : `rgba(47, 165, 120, ${Math.abs(cfg.temp) / 90})`;
-    ctx.fillRect(x, y, w, h);
+  ctx.fillStyle = '#2d2118';
+  ctx.font = '700 24px ui-monospace, SFMono-Regular, monospace';
+  ctx.fillText('35MM / ' + new Date().toLocaleDateString(), x + 34, y + h - 28);
+}
+
+function grain(ctx: CanvasRenderingContext2D, w: number, h: number) {
+  for (let i = 0; i < 1800; i++) {
+    const v = Math.random() > .5 ? 255 : 0;
+    ctx.fillStyle = `rgba(${v},${v},${v},.055)`;
+    ctx.fillRect(Math.random() * w, Math.random() * h, Math.random() * 1.8, Math.random() * 1.8);
   }
+}
+
+function filmHoles(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number) {
+  ctx.fillStyle = '#080705';
+  for (let i = 0; i < 13; i++) {
+    const hx = x + 26 + i * ((w - 80) / 12);
+    rr(ctx, hx, y + 18, 30, 44, 8); ctx.fill();
+    rr(ctx, hx, y + h - 62, 30, 44, 8); ctx.fill();
+  }
+}
+
+async function render(canvas: HTMLCanvasElement, photos: Photo[], look: FilmLook, template: Template, caption: string) {
+  const W = 1200;
+  const H = 1600;
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext('2d')!;
+  const l = looks[look];
+  const imgs = await Promise.all(photos.slice(0, 6).map((p) => image(p.url)));
+
+  ctx.fillStyle = l.bg;
+  ctx.fillRect(0, 0, W, H);
+  const glow = ctx.createRadialGradient(150, 120, 10, 150, 120, 900);
+  glow.addColorStop(0, l.warm);
+  glow.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = glow;
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.fillStyle = l.ink;
+  ctx.font = '900 78px ui-sans-serif, system-ui';
+  ctx.fillText('FILM ROLL', 74, 122);
+  ctx.font = '700 26px ui-monospace, SFMono-Regular, monospace';
+  ctx.globalAlpha = .72;
+  ctx.fillText(`${l.name.toUpperCase()}  •  FRAME ${String(imgs.length).padStart(2, '0')}`, 80, 166);
+  ctx.globalAlpha = 1;
+
+  if (template === 'cover' || imgs.length === 1) {
+    photoFrame(ctx, imgs[0], 105, 245, 990, 1040, look, 34);
+  }
+
+  if (template === 'strip' && imgs.length > 1) {
+    const x = 80, y = 300, w = 1040, h = 780;
+    rr(ctx, x, y, w, h, 36); ctx.fillStyle = '#12100e'; ctx.fill();
+    filmHoles(ctx, x, y, w, h);
+    const n = Math.min(imgs.length, 3);
+    const fw = (w - 120 - (n - 1) * 26) / n;
+    for (let i = 0; i < n; i++) {
+      rr(ctx, x + 60 + i * (fw + 26), y + 105, fw, h - 210, 18); ctx.save(); ctx.clip();
+      cover(ctx, imgs[i], x + 60 + i * (fw + 26), y + 105, fw, h - 210);
+      ctx.globalCompositeOperation = 'soft-light'; ctx.fillStyle = l.wash; ctx.fillRect(x + 60 + i * (fw + 26), y + 105, fw, h - 210); ctx.restore();
+      ctx.fillStyle = '#f3dbae'; ctx.font = '700 22px ui-monospace, monospace'; ctx.fillText(`0${i + 1}`, x + 78 + i * (fw + 26), y + h - 76);
+    }
+  }
+
+  if (template === 'contact' && imgs.length > 1) {
+    const cols = 2, gap = 28, x0 = 90, y0 = 260, fw = 491, fh = 360;
+    for (let i = 0; i < Math.min(imgs.length, 6); i++) {
+      const x = x0 + (i % cols) * (fw + gap);
+      const y = y0 + Math.floor(i / cols) * (fh + 76);
+      photoFrame(ctx, imgs[i], x, y, fw, fh + 56, look, 18);
+      ctx.fillStyle = l.ink; ctx.font = '800 22px ui-monospace, monospace'; ctx.fillText(`FRAME ${String(i + 1).padStart(2, '0')}`, x + 28, y + fh + 32);
+    }
+  }
+
+  ctx.fillStyle = l.ink;
+  ctx.textAlign = 'center';
+  ctx.font = '800 36px ui-sans-serif, system-ui';
+  ctx.fillText(caption || 'shot on fake film', W / 2, 1430);
+  ctx.globalAlpha = .55;
+  ctx.font = '700 20px ui-monospace, monospace';
+  ctx.fillText('FAKEFILMROLL.APP', W / 2, 1472);
+  ctx.globalAlpha = 1;
 
   ctx.globalCompositeOperation = 'multiply';
-  const grad = ctx.createRadialGradient(x + w / 2, y + h / 2, Math.min(w, h) / 5, x + w / 2, y + h / 2, Math.max(w, h) / 1.15);
-  grad.addColorStop(0, 'rgba(255,255,255,0)');
-  grad.addColorStop(1, 'rgba(0,0,0,0.30)');
-  ctx.fillStyle = grad;
-  ctx.fillRect(x, y, w, h);
-  ctx.restore();
-}
-
-function drawGrain(ctx: CanvasRenderingContext2D, width: number, height: number, opacity = 0.08) {
-  const count = Math.floor((width * height) / 900);
-  ctx.save();
-  for (let i = 0; i < count; i += 1) {
-    const shade = Math.random() > 0.5 ? 255 : 0;
-    ctx.fillStyle = `rgba(${shade},${shade},${shade},${opacity})`;
-    ctx.fillRect(Math.random() * width, Math.random() * height, Math.random() * 2 + 0.5, Math.random() * 2 + 0.5);
-  }
-  ctx.restore();
-}
-
-function drawLightLeaks(ctx: CanvasRenderingContext2D, width: number, height: number, accent: string) {
-  ctx.save();
-  ctx.globalCompositeOperation = 'screen';
-  const g1 = ctx.createRadialGradient(width * 0.04, height * 0.13, 10, width * 0.04, height * 0.13, width * 0.5);
-  g1.addColorStop(0, `${accent}bb`);
-  g1.addColorStop(0.55, `${accent}44`);
-  g1.addColorStop(1, 'rgba(0,0,0,0)');
-  ctx.fillStyle = g1;
-  ctx.fillRect(0, 0, width, height);
-
-  const g2 = ctx.createLinearGradient(width * 0.72, 0, width, height);
-  g2.addColorStop(0, 'rgba(255,120,55,0.26)');
-  g2.addColorStop(1, 'rgba(255,255,255,0)');
-  ctx.fillStyle = g2;
-  ctx.fillRect(0, 0, width, height);
-  ctx.restore();
-}
-
-function drawSprockets(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, horizontal: boolean) {
-  ctx.fillStyle = '#080706';
-  if (horizontal) {
-    const holes = Math.floor(w / 72);
-    for (let i = 0; i < holes; i += 1) {
-      const hx = x + 24 + i * ((w - 48) / holes);
-      roundedRect(ctx, hx, y + 16, 28, 42, 7);
-      ctx.fill();
-      roundedRect(ctx, hx, y + h - 58, 28, 42, 7);
-      ctx.fill();
-    }
-  } else {
-    const holes = Math.floor(h / 74);
-    for (let i = 0; i < holes; i += 1) {
-      const hy = y + 24 + i * ((h - 48) / holes);
-      roundedRect(ctx, x + 16, hy, 42, 28, 7);
-      ctx.fill();
-      roundedRect(ctx, x + w - 58, hy, 42, 28, 7);
-      ctx.fill();
-    }
-  }
-}
-
-async function renderFilmRoll(canvas: HTMLCanvasElement, photos: Photo[], look: FilmLook, layout: Layout, caption: string) {
-  const { width, height } = LAYOUTS[layout];
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return;
-
-  const cfg = LOOKS[look];
-  ctx.fillStyle = '#14110f';
-  ctx.fillRect(0, 0, width, height);
-
-  const bg = ctx.createLinearGradient(0, 0, width, height);
-  bg.addColorStop(0, '#2a211c');
-  bg.addColorStop(0.45, '#111');
-  bg.addColorStop(1, '#302016');
-  ctx.fillStyle = bg;
-  ctx.fillRect(0, 0, width, height);
-
-  ctx.fillStyle = '#f5ead9';
-  ctx.font = `700 ${Math.round(width * 0.045)}px ui-sans-serif, system-ui`;
-  ctx.fillText('FAKE FILM ROLL', width * 0.06, height * 0.07);
-  ctx.fillStyle = cfg.accent;
-  ctx.font = `600 ${Math.round(width * 0.022)}px ui-monospace, SFMono-Regular`;
-  ctx.fillText(`${cfg.label} • ${new Date().toLocaleDateString()}`, width * 0.06, height * 0.098);
-
-  const horizontal = layout !== 'story';
-  const stripX = width * 0.055;
-  const stripY = horizontal ? height * 0.22 : height * 0.14;
-  const stripW = width * 0.89;
-  const stripH = horizontal ? height * 0.54 : height * 0.72;
-
-  roundedRect(ctx, stripX, stripY, stripW, stripH, 28);
-  ctx.fillStyle = '#0d0b09';
-  ctx.fill();
-  drawSprockets(ctx, stripX, stripY, stripW, stripH, horizontal);
-
-  const maxFrames = horizontal ? Math.min(photos.length, 4) : Math.min(photos.length, 5);
-  const imgs = await Promise.all(photos.slice(0, maxFrames).map((p) => loadImage(p.url)));
-  const pad = horizontal ? 82 : 84;
-  const gap = 22;
-  const frameAreaX = stripX + (horizontal ? 34 : pad);
-  const frameAreaY = stripY + (horizontal ? pad : 34);
-  const frameAreaW = stripW - (horizontal ? 68 : pad * 2);
-  const frameAreaH = stripH - (horizontal ? pad * 2 : 68);
-
-  imgs.forEach((img, i) => {
-    const fw = horizontal ? (frameAreaW - gap * (maxFrames - 1)) / maxFrames : frameAreaW;
-    const fh = horizontal ? frameAreaH : (frameAreaH - gap * (maxFrames - 1)) / maxFrames;
-    const fx = horizontal ? frameAreaX + i * (fw + gap) : frameAreaX;
-    const fy = horizontal ? frameAreaY : frameAreaY + i * (fh + gap);
-
-    drawCover(ctx, img, fx, fy, fw, fh, look);
-    ctx.strokeStyle = '#27201a';
-    ctx.lineWidth = 7;
-    roundedRect(ctx, fx, fy, fw, fh, 18);
-    ctx.stroke();
-
-    ctx.fillStyle = '#e8d7b7';
-    ctx.font = `700 ${Math.round(width * 0.015)}px ui-monospace, SFMono-Regular`;
-    ctx.fillText(String(i + 1).padStart(2, '0'), fx + 14, fy + fh - 16);
-  });
-
-  ctx.save();
-  ctx.translate(width * 0.5, height * 0.94);
-  ctx.textAlign = 'center';
-  ctx.fillStyle = '#f1dfc7';
-  ctx.font = `600 ${Math.round(width * 0.026)}px ui-sans-serif, system-ui`;
-  ctx.fillText(caption || 'your memories, shot on fake 35mm', 0, 0);
-  ctx.fillStyle = 'rgba(245,234,217,0.62)';
-  ctx.font = `500 ${Math.round(width * 0.016)}px ui-monospace, SFMono-Regular`;
-  ctx.fillText('made with fakefilmroll.app', 0, 32);
-  ctx.restore();
-
-  drawLightLeaks(ctx, width, height, cfg.accent);
-  drawGrain(ctx, width, height, look === 'mono' ? 0.12 : 0.08);
+  const vignette = ctx.createRadialGradient(W / 2, H / 2, 420, W / 2, H / 2, 980);
+  vignette.addColorStop(0, 'rgba(255,255,255,0)');
+  vignette.addColorStop(1, 'rgba(0,0,0,.18)');
+  ctx.fillStyle = vignette; ctx.fillRect(0, 0, W, H);
+  ctx.globalCompositeOperation = 'source-over';
+  grain(ctx, W, H);
 }
 
 export default function App() {
   const [photos, setPhotos] = useState<Photo[]>([]);
-  const [look, setLook] = useState<FilmLook>('kodak');
-  const [layout, setLayout] = useState<Layout>('story');
-  const [caption, setCaption] = useState('summer looked better on film');
+  const [look, setLook] = useState<FilmLook>('gold');
+  const [template, setTemplate] = useState<Template>('cover');
+  const [caption, setCaption] = useState('today felt like a movie');
+  const [cameraOpen, setCameraOpen] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-
-  const previewPhotos = useMemo(() => photos.slice(0, layout === 'story' ? 5 : 4), [photos, layout]);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
 
   useEffect(() => {
-    if (!canvasRef.current || previewPhotos.length === 0) return;
-    renderFilmRoll(canvasRef.current, previewPhotos, look, layout, caption);
-  }, [previewPhotos, look, layout, caption]);
+    if (!photos.length || !canvasRef.current) return;
+    render(canvasRef.current, photos, look, template, caption);
+  }, [photos, look, template, caption]);
 
-  function onFiles(e: ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(e.target.files || []).filter((file) => file.type.startsWith('image/'));
-    setPhotos((current) => [
-      ...current,
-      ...files.map((file) => ({ id: `${file.name}-${file.lastModified}-${Math.random()}`, file, url: URL.createObjectURL(file) })),
-    ].slice(0, 12));
+  async function openCamera() {
+    setCameraOpen(true);
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+    streamRef.current = stream;
+    setTimeout(() => { if (videoRef.current) videoRef.current.srcObject = stream; }, 0);
+  }
+
+  function closeCamera() {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+    setCameraOpen(false);
+  }
+
+  function snap() {
+    const video = videoRef.current;
+    if (!video) return;
+    const c = document.createElement('canvas');
+    c.width = video.videoWidth;
+    c.height = video.videoHeight;
+    c.getContext('2d')!.drawImage(video, 0, 0);
+    setPhotos([{ id: crypto.randomUUID(), url: c.toDataURL('image/jpeg', .92), name: 'camera.jpg' }]);
+    setTemplate('cover');
+    closeCamera();
+  }
+
+  function upload(e: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files || []).filter((f) => f.type.startsWith('image/'));
+    const next = files.map((file) => ({ id: crypto.randomUUID(), url: URL.createObjectURL(file), name: file.name }));
+    setPhotos(next.slice(0, 6));
+    setTemplate(next.length > 1 ? 'strip' : 'cover');
     e.target.value = '';
   }
 
   function download() {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const link = document.createElement('a');
-    link.href = canvas.toDataURL('image/png');
-    link.download = `fake-film-roll-${Date.now()}.png`;
-    link.click();
+    const a = document.createElement('a');
+    a.href = canvasRef.current!.toDataURL('image/png');
+    a.download = `fake-film-roll-${Date.now()}.png`;
+    a.click();
   }
 
-  function clearPhotos() {
-    photos.forEach((p) => URL.revokeObjectURL(p.url));
-    setPhotos([]);
-  }
+  return <main className="shell">
+    <section className="top">
+      <div className="mark"><Sparkles size={16}/> fake film roll</div>
+      <h1>Shoot it. Make it look like film.</h1>
+      <p>No timeline, no editing headache. Take one photo or upload a dump — get a beautiful retro frame instantly.</p>
+      <div className="quick">
+        <button className="shoot" onClick={openCamera}><Camera/> Take photo</button>
+        <label className="uploadBtn"><ImagePlus/> Upload photos<input type="file" accept="image/*" multiple onChange={upload}/></label>
+      </div>
+    </section>
 
-  return (
-    <main className="app">
-      <section className="hero">
-        <div className="badge"><Sparkles size={16} /> instant nostalgia generator</div>
-        <h1>Turn your camera roll into a 35mm film strip.</h1>
-        <p>Upload a few photos, pick a film look, export a ready-to-share retro roll for Stories, posts, or moodboards.</p>
-      </section>
+    <section className="studio">
+      <aside className="controls">
+        <div className="miniTitle">1. Pick a vibe</div>
+        <div className="seg">{(Object.keys(looks) as FilmLook[]).map(k => <button key={k} className={look === k ? 'on' : ''} onClick={() => setLook(k)}>{looks[k].name}</button>)}</div>
+        <div className="miniTitle">2. Pick format</div>
+        <div className="seg">{(Object.keys(templates) as Template[]).map(k => <button key={k} className={template === k ? 'on' : ''} onClick={() => setTemplate(k)}>{templates[k]}</button>)}</div>
+        <div className="miniTitle">3. Caption</div>
+        <input className="caption" value={caption} maxLength={38} onChange={(e) => setCaption(e.target.value)} />
+        <button className="download" disabled={!photos.length} onClick={download}><Download/> Save image</button>
+        <button className="reset" disabled={!photos.length} onClick={() => setPhotos([])}><RefreshCw/> Start over</button>
+      </aside>
 
-      <section className="workspace">
-        <aside className="panel">
-          <label className="upload">
-            <ImagePlus />
-            <span>Upload photos</span>
-            <small>3–12 images works best</small>
-            <input type="file" accept="image/*" multiple onChange={onFiles} />
-          </label>
+      <div className="phone">
+        {!photos.length ? <div className="placeholder"><Camera size={54}/><b>Tap “Take photo”</b><span>or upload one image — preview shows here instantly.</span></div> : <canvas ref={canvasRef}/>} 
+      </div>
+    </section>
 
-          <div className="control">
-            <span>Film look</span>
-            <div className="chips">
-              {(Object.keys(LOOKS) as FilmLook[]).map((key) => (
-                <button key={key} className={look === key ? 'active' : ''} onClick={() => setLook(key)}>
-                  {LOOKS[key].label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="control">
-            <span>Export size</span>
-            <div className="chips">
-              {(Object.keys(LAYOUTS) as Layout[]).map((key) => (
-                <button key={key} className={layout === key ? 'active' : ''} onClick={() => setLayout(key)}>
-                  {LAYOUTS[key].label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <label className="control">
-            <span>Caption</span>
-            <input value={caption} maxLength={48} onChange={(e) => setCaption(e.target.value)} placeholder="your memories, shot on fake 35mm" />
-          </label>
-
-          <div className="thumbs">
-            {photos.length === 0 ? <p>No photos yet. Drop in your favorites.</p> : photos.map((photo) => <img key={photo.id} src={photo.url} alt={photo.file.name} />)}
-          </div>
-
-          <div className="actions">
-            <button className="primary" disabled={photos.length === 0} onClick={download}><Download size={18} /> Export PNG</button>
-            <button className="ghost" disabled={photos.length === 0} onClick={clearPhotos}><Trash2 size={18} /> Clear</button>
-          </div>
-        </aside>
-
-        <div className="preview">
-          {photos.length === 0 ? (
-            <div className="empty">
-              <Camera size={64} />
-              <h2>Your film roll preview appears here</h2>
-              <p>Start with a few photos. The app renders everything locally in your browser.</p>
-            </div>
-          ) : null}
-          <canvas ref={canvasRef} className={photos.length === 0 ? 'hidden' : ''} />
-        </div>
-      </section>
-    </main>
-  );
+    {cameraOpen && <div className="cameraModal">
+      <button className="close" onClick={closeCamera}><X/></button>
+      <video ref={videoRef} autoPlay playsInline />
+      <button className="shutter" onClick={snap}></button>
+    </div>}
+  </main>;
 }
