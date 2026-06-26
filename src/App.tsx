@@ -1,8 +1,9 @@
 import { ChangeEvent, useEffect, useRef, useState } from 'react';
 import { Camera, Download, ImagePlus, RefreshCw, Sparkles, X } from 'lucide-react';
+import ThreeRoll from './ThreeRoll';
 
 type FilmLook = 'gold' | 'tokyo' | 'noir';
-type Template = 'stamp' | 'roll' | 'cover' | 'strip' | 'contact';
+type Template = 'stamp' | 'roll3d' | 'roll' | 'cover' | 'strip' | 'contact';
 
 type Photo = { id: string; url: string; name: string };
 
@@ -14,6 +15,7 @@ const looks: Record<FilmLook, { name: string; bg: string; ink: string; wash: str
 
 const templates: Record<Template, string> = {
   stamp: 'Film stamp',
+  roll3d: '3D pull roll',
   roll: 'Fake roll',
   cover: 'Instant cover',
   strip: 'Film strip',
@@ -346,13 +348,14 @@ export default function App() {
     const files = Array.from(e.target.files || []).filter((f) => f.type.startsWith('image/'));
     const next = files.map((file) => ({ id: crypto.randomUUID(), url: URL.createObjectURL(file), name: file.name }));
     setPhotos(next.slice(0, 6));
-    setTemplate(next.length > 1 ? 'roll' : 'stamp');
+    setTemplate(next.length > 1 ? 'roll3d' : 'stamp');
     e.target.value = '';
   }
 
   function download() {
+    if (!canvasRef.current) return;
     const a = document.createElement('a');
-    a.href = canvasRef.current!.toDataURL('image/png');
+    a.href = canvasRef.current.toDataURL('image/png');
     a.download = `fake-film-roll-${Date.now()}.png`;
     a.click();
   }
@@ -376,12 +379,12 @@ export default function App() {
         <div className="seg">{(Object.keys(templates) as Template[]).map(k => <button key={k} className={template === k ? 'on' : ''} onClick={() => setTemplate(k)}>{templates[k]}</button>)}</div>
         <div className="miniTitle">3. Caption</div>
         <input className="caption" value={caption} maxLength={38} onChange={(e) => setCaption(e.target.value)} />
-        <button className="download" disabled={!photos.length} onClick={download}><Download/> Save image</button>
+        <button className="download" disabled={!photos.length || template === 'roll3d'} onClick={download}><Download/> Save image</button>
         <button className="reset" disabled={!photos.length} onClick={() => setPhotos([])}><RefreshCw/> Start over</button>
       </aside>
 
       <div className="phone">
-        {!photos.length ? <div className="placeholder"><Camera size={54}/><b>Tap “Take photo”</b><span>or upload one image — preview shows here instantly.</span></div> : <canvas ref={canvasRef}/>} 
+        {!photos.length ? <div className="placeholder"><Camera size={54}/><b>Tap “Take photo”</b><span>or upload one image — preview shows here instantly.</span></div> : template === 'roll3d' ? <ThreeRoll photos={photos} look={look} caption={caption} /> : <canvas ref={canvasRef}/>} 
       </div>
     </section>
 
