@@ -1,0 +1,24 @@
+{
+  "expo": {
+    "name": "Fake Film Roll",
+    "slug": "fake-film-roll",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "fakefilmroll",
+    "userInterfaceStyle": "dark",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#0a0907"
+      }
+    },
+    "web": {
+      "bundler": "metro"
+    }
+  }
+}

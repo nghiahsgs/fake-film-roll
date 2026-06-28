@@ -1,282 +1,263 @@
-import { useEffect, useRef, useState } from 'react';
+import { Canvas, useFrame } from '@react-three/fiber/native';
+import Slider from '@react-native-community/slider';
+import { Download } from 'lucide-react-native';
+import { useMemo, useRef, useState } from 'react';
+import { PanResponder, Pressable, StyleSheet, Text, View } from 'react-native';
 import * as THREE from 'three';
-import { Download } from 'lucide-react';
 
-type Photo = { id: string; url: string; name: string };
-type FilmLook = 'gold' | 'tokyo' | 'noir';
+export type FilmLook = 'gold' | 'tokyo' | 'noir';
+export type Photo = { id: string; uri: string; name: string };
 
 type Props = {
   photos: Photo[];
   look: FilmLook;
   caption: string;
+  onSave: () => void;
 };
 
-function loadImage(src: string) {
-  return new Promise<HTMLImageElement>((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = reject;
-    img.src = src;
-  });
+const lookColors: Record<FilmLook, { label: string; rim: string; labelColor: string; strip: string }> = {
+  gold: { label: 'KODAK SUMMER', rim: '#ffb24a', labelColor: '#f7c84d', strip: '#161310' },
+  tokyo: { label: 'TOKYO NIGHT', rim: '#36e0c3', labelColor: '#47d8c2', strip: '#10161a' },
+  noir: { label: 'NOIR DIARY', rim: '#f0e7d5', labelColor: '#d8d0c1', strip: '#111111' },
+};
+
+function Dust() {
+  const dots = useMemo(() => Array.from({ length: 70 }, () => ({
+    position: [
+      (Math.random() - 0.5) * 6,
+      (Math.random() - 0.5) * 5 + 0.4,
+      (Math.random() - 0.5) * 4,
+    ] as [number, number, number],
+    size: Math.random() * 0.012 + 0.004,
+    opacity: Math.random() * 0.45 + 0.12,
+  })), []);
+
+  return (
+    <group>
+      {dots.map((dot, index) => (
+        <mesh key={index} position={dot.position}>
+          <sphereGeometry args={[dot.size, 8, 8]} />
+          <meshBasicMaterial color="#ffe2aa" transparent opacity={dot.opacity} />
+        </mesh>
+      ))}
+    </group>
+  );
 }
 
-async function makeStripTexture(photos: Photo[], look: FilmLook, caption: string) {
-  const canvas = document.createElement('canvas');
-  canvas.width = 1024;
-  canvas.height = 4096;
-  const ctx = canvas.getContext('2d')!;
-  ctx.fillStyle = '#0b0b0b';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+function FilmScene({ look, pull, rotation }: { look: FilmLook; pull: number; rotation: number }) {
+  const groupRef = useRef<THREE.Group>(null);
+  const canRef = useRef<THREE.Mesh>(null);
+  const dustRef = useRef<THREE.Group>(null);
+  const colors = lookColors[look];
+  const stripScale = 0.42 + (pull / 100) * 0.78;
 
-  const imgs = await Promise.all(photos.slice(0, 6).map((p) => loadImage(p.url)));
-  const frameH = 520;
-  const gap = 70;
-  const x = 170;
-  const w = 684;
-  let y = 180;
-
-  for (let i = 0; i < 38; i++) {
-    const hy = 34 + i * 106;
-    ctx.fillStyle = '#020202';
-    ctx.roundRect(28, hy, 82, 58, 12); ctx.fill();
-    ctx.roundRect(914, hy, 82, 58, 12); ctx.fill();
-  }
-
-  imgs.forEach((img, i) => {
-    ctx.save();
-    ctx.roundRect(x, y, w, frameH, 28);
-    ctx.clip();
-    const s = Math.max(w / img.width, frameH / img.height);
-    const sw = w / s;
-    const sh = frameH / s;
-    ctx.drawImage(img, (img.width - sw) / 2, (img.height - sh) / 2, sw, sh, x, y, w, frameH);
-    ctx.globalCompositeOperation = look === 'noir' ? 'saturation' : 'screen';
-    ctx.fillStyle = look === 'tokyo' ? 'rgba(40,220,190,.22)' : 'rgba(255,210,120,.20)';
-    ctx.fillRect(x, y, w, frameH);
-    ctx.restore();
-
-    ctx.strokeStyle = 'rgba(255,255,255,.18)';
-    ctx.lineWidth = 8;
-    ctx.strokeRect(x, y, w, frameH);
-    ctx.fillStyle = '#f6d28a';
-    ctx.font = '900 42px ui-monospace, monospace';
-    ctx.fillText(`FRAME ${String(i + 1).padStart(2, '0')}`, x, y + frameH + 46);
-    y += frameH + gap;
-  });
-
-  const grad = ctx.createLinearGradient(0, 0, canvas.width, 0);
-  grad.addColorStop(0, 'rgba(255,255,255,.04)');
-  grad.addColorStop(.38, 'rgba(255,255,255,.26)');
-  grad.addColorStop(.52, 'rgba(0,0,0,.08)');
-  grad.addColorStop(1, 'rgba(0,0,0,.34)');
-  ctx.globalCompositeOperation = 'screen';
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.globalCompositeOperation = 'source-over';
-
-  ctx.save();
-  ctx.translate(928, 300);
-  ctx.rotate(Math.PI / 2);
-  ctx.fillStyle = 'rgba(246,210,138,.82)';
-  ctx.font = '900 54px ui-monospace, monospace';
-  ctx.fillText(`FAKE FILM ROLL / ${caption.toUpperCase() || 'MEMORY'} / 36 EXP`, 0, 0);
-  ctx.restore();
-
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 8;
-  tex.wrapS = THREE.ClampToEdgeWrapping;
-  tex.wrapT = THREE.ClampToEdgeWrapping;
-  return tex;
-}
-
-export default function ThreeRoll({ photos, look, caption }: Props) {
-  const mountRef = useRef<HTMLDivElement>(null);
-  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
-  const pullRef = useRef(62);
-  const [pull, setPull] = useState(62);
-
-  useEffect(() => {
-    if (!mountRef.current || photos.length === 0) return;
-    const mount = mountRef.current;
-    mount.innerHTML = '';
-
-    const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0b0907);
-    scene.fog = new THREE.Fog(0x0b0907, 7, 15);
-
-    const camera = new THREE.PerspectiveCamera(35, mount.clientWidth / mount.clientHeight, 0.1, 100);
-    camera.position.set(0.2, 2.0, 8.2);
-
-    const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true, alpha: false });
-    renderer.setSize(mount.clientWidth, mount.clientHeight);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    renderer.outputColorSpace = THREE.SRGBColorSpace;
-    renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.14;
-    mount.appendChild(renderer.domElement);
-    rendererRef.current = renderer;
-
-    const group = new THREE.Group();
-    group.rotation.x = -0.15;
-    scene.add(group);
-
-    const hemi = new THREE.HemisphereLight(0xffefd0, 0x161616, 1.35);
-    scene.add(hemi);
-    const key = new THREE.DirectionalLight(0xffdfab, 4.5);
-    key.position.set(-3.5, 6, 5);
-    key.castShadow = true;
-    key.shadow.mapSize.set(2048, 2048);
-    scene.add(key);
-    const rim = new THREE.PointLight(look === 'tokyo' ? 0x33e1c3 : 0xff8d45, 18, 8);
-    rim.position.set(3.4, 2.2, 2.2);
-    scene.add(rim);
-
-    const floor = new THREE.Mesh(
-      new THREE.PlaneGeometry(14, 14),
-      new THREE.MeshStandardMaterial({ color: 0x3a2416, roughness: 0.72, metalness: 0.04 }),
-    );
-    floor.rotation.x = -Math.PI / 2;
-    floor.position.y = -2.15;
-    floor.receiveShadow = true;
-    scene.add(floor);
-
-    let strip: THREE.Mesh | null = null;
-    makeStripTexture(photos, look, caption).then((texture) => {
-      const geo = new THREE.PlaneGeometry(2.25, 6.9, 36, 150);
-      const pos = geo.attributes.position as THREE.BufferAttribute;
-      for (let i = 0; i < pos.count; i++) {
-        const y = pos.getY(i);
-        const x = pos.getX(i);
-        const t = (y + 3.45) / 6.9;
-        pos.setZ(i, Math.sin(t * Math.PI * 1.35) * 1.05 + x * x * 0.08);
-        pos.setX(i, x + Math.sin(t * Math.PI * 1.1) * 0.35);
-      }
-      geo.computeVertexNormals();
-      const mat = new THREE.MeshPhysicalMaterial({
-        map: texture,
-        side: THREE.DoubleSide,
-        roughness: 0.35,
-        metalness: 0.0,
-        clearcoat: 0.82,
-        clearcoatRoughness: 0.18,
-        transparent: false,
-      });
-      strip = new THREE.Mesh(geo, mat);
-      strip.castShadow = true;
-      strip.receiveShadow = true;
-      strip.position.set(0, -0.25, 0.15);
-      strip.rotation.x = -0.08;
-      group.add(strip);
-    });
-
-    const metal = new THREE.MeshPhysicalMaterial({ color: 0x15110e, roughness: 0.28, metalness: 0.78, clearcoat: 0.65 });
-    const label = new THREE.MeshStandardMaterial({ color: look === 'tokyo' ? 0x38d8bd : 0xf4bd36, roughness: 0.48 });
-    const can = new THREE.Mesh(new THREE.CylinderGeometry(0.76, 0.76, 2.55, 80), metal);
-    can.rotation.z = Math.PI / 2;
-    can.position.set(0, 2.65, .03);
-    can.castShadow = true;
-    group.add(can);
-    const sleeve = new THREE.Mesh(new THREE.CylinderGeometry(0.775, 0.775, 1.72, 80, 1, true, 0.2, Math.PI * 1.35), label);
-    sleeve.rotation.z = Math.PI / 2;
-    sleeve.position.copy(can.position);
-    sleeve.castShadow = true;
-    group.add(sleeve);
-
-    const capMat = new THREE.MeshStandardMaterial({ color: 0x050505, roughness: 0.35, metalness: 0.55 });
-    [-1.36, 1.36].forEach((x) => {
-      const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 0.8, 0.14, 80), capMat);
-      cap.rotation.z = Math.PI / 2;
-      cap.position.set(x, 2.65, .03);
-      cap.castShadow = true;
-      group.add(cap);
-    });
-
-    const particles = new THREE.Group();
-    for (let i = 0; i < 90; i++) {
-      const dust = new THREE.Mesh(new THREE.SphereGeometry(Math.random() * .012 + .004, 8, 8), new THREE.MeshBasicMaterial({ color: 0xffe1aa, transparent: true, opacity: Math.random() * .5 }));
-      dust.position.set((Math.random() - .5) * 6, (Math.random() - .5) * 5 + .4, (Math.random() - .5) * 4);
-      particles.add(dust);
+  useFrame((state, delta) => {
+    if (groupRef.current) {
+      groupRef.current.rotation.y = rotation + state.clock.elapsedTime * 0.16;
+      groupRef.current.position.y = Math.sin(state.clock.elapsedTime * 1.1) * 0.035;
     }
-    scene.add(particles);
+    if (canRef.current) {
+      canRef.current.rotation.x += delta * (1.4 + pull / 45);
+    }
+    if (dustRef.current) {
+      dustRef.current.rotation.y -= delta * 0.18;
+    }
+  });
 
-    let dragging = false;
-    let lastX = 0;
-    const onDown = (e: PointerEvent) => { dragging = true; lastX = e.clientX; };
-    const onMove = (e: PointerEvent) => {
-      if (!dragging) return;
-      group.rotation.y += (e.clientX - lastX) * 0.008;
-      lastX = e.clientX;
-    };
-    const onUp = () => { dragging = false; };
-    renderer.domElement.addEventListener('pointerdown', onDown);
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
+  return (
+    <>
+      <color attach="background" args={['#0b0907']} />
+      <fog attach="fog" args={['#0b0907', 7, 15]} />
+      <hemisphereLight args={['#ffefd0', '#161616', 1.35]} />
+      <directionalLight position={[-3.5, 6, 5]} intensity={4.5} castShadow />
+      <pointLight position={[3.4, 2.2, 2.2]} intensity={18} distance={8} color={colors.rim} />
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -2.15, 0]} receiveShadow>
+        <planeGeometry args={[14, 14]} />
+        <meshStandardMaterial color="#3a2416" roughness={0.72} metalness={0.04} />
+      </mesh>
 
-    const onResize = () => {
-      if (!mount.clientWidth || !mount.clientHeight) return;
-      camera.aspect = mount.clientWidth / mount.clientHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(mount.clientWidth, mount.clientHeight);
-    };
-    window.addEventListener('resize', onResize);
+      <group ref={groupRef} rotation={[-0.15, 0, 0]}>
+        <mesh
+          position={[0, 2.65, 0.03]}
+          rotation={[0, 0, Math.PI / 2]}
+          ref={canRef}
+          castShadow
+        >
+          <cylinderGeometry args={[0.76, 0.76, 2.55, 80]} />
+          <meshPhysicalMaterial color="#15110e" roughness={0.28} metalness={0.78} clearcoat={0.65} />
+        </mesh>
+        <mesh position={[0, 2.65, 0.04]} rotation={[0, 0, Math.PI / 2]} castShadow>
+          <cylinderGeometry args={[0.775, 0.775, 1.72, 80, 1, true, 0.2, Math.PI * 1.35]} />
+          <meshStandardMaterial color={colors.labelColor} roughness={0.48} side={THREE.DoubleSide} />
+        </mesh>
+        {[-1.36, 1.36].map((x) => (
+          <mesh key={x} position={[x, 2.65, 0.03]} rotation={[0, 0, Math.PI / 2]} castShadow>
+            <cylinderGeometry args={[0.8, 0.8, 0.14, 80]} />
+            <meshStandardMaterial color="#050505" roughness={0.35} metalness={0.55} />
+          </mesh>
+        ))}
 
-    let frame = 0;
-    let raf = 0;
-    const animate = () => {
-      frame += 0.01;
-      if (!dragging) group.rotation.y += 0.0025;
-      group.position.y = Math.sin(frame) * 0.035;
-      const p = pullRef.current / 100;
-      if (strip) {
-        strip.scale.y = 0.42 + p * 0.78;
-        strip.position.y = 1.15 - p * 1.9;
-        strip.position.z = -0.25 + p * 0.5;
-      }
-      can.rotation.x += 0.01 + p * 0.018;
-      particles.rotation.y -= 0.0015;
-      renderer.render(scene, camera);
-      raf = requestAnimationFrame(animate);
-    };
-    animate();
+        <group position={[0, 1.15 - (pull / 100) * 1.9, -0.25 + (pull / 100) * 0.5]} rotation={[-0.08, 0, 0]} scale={[1, stripScale, 1]}>
+          <mesh castShadow receiveShadow>
+            <planeGeometry args={[2.25, 6.9, 18, 80]} />
+            <meshPhysicalMaterial color={colors.strip} side={THREE.DoubleSide} roughness={0.35} clearcoat={0.82} clearcoatRoughness={0.18} />
+          </mesh>
+          {Array.from({ length: 7 }).map((_, index) => {
+            const y = 2.72 - index * 0.86;
+            return (
+              <mesh key={index} position={[0, y, 0.012]}>
+                <planeGeometry args={[1.35, 0.62]} />
+                <meshBasicMaterial color={index % 2 ? colors.labelColor : '#f5e0b3'} transparent opacity={0.9} />
+              </mesh>
+            );
+          })}
+          {Array.from({ length: 18 }).map((_, index) => {
+            const y = 3.15 - index * 0.37;
+            return (
+              <group key={index}>
+                <mesh position={[-0.97, y, 0.018]}>
+                  <boxGeometry args={[0.18, 0.12, 0.02]} />
+                  <meshBasicMaterial color="#020202" />
+                </mesh>
+                <mesh position={[0.97, y, 0.018]}>
+                  <boxGeometry args={[0.18, 0.12, 0.02]} />
+                  <meshBasicMaterial color="#020202" />
+                </mesh>
+              </group>
+            );
+          })}
+        </group>
+      </group>
 
-    return () => {
-      cancelAnimationFrame(raf);
-      window.removeEventListener('resize', onResize);
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      renderer.domElement.removeEventListener('pointerdown', onDown);
-      renderer.dispose();
-      scene.traverse((obj) => {
-        if (obj instanceof THREE.Mesh) {
-          obj.geometry.dispose();
-          const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
-          mats.forEach((m) => m.dispose());
-        }
-      });
-      mount.innerHTML = '';
-    };
-  }, [photos, look, caption]);
-
-  function save() {
-    const renderer = rendererRef.current;
-    if (!renderer) return;
-    const a = document.createElement('a');
-    a.href = renderer.domElement.toDataURL('image/png');
-    a.download = `fake-film-roll-3d-${Date.now()}.png`;
-    a.click();
-  }
-
-  return <div className="threeWrap">
-    <div ref={mountRef} className="threeMount" />
-    <div className="threeHud">
-      <span>Drag to rotate</span>
-      <label className="pullControl">Pull film
-        <input type="range" min="18" max="100" value={pull} onChange={(e) => { const v = Number(e.target.value); pullRef.current = v; setPull(v); }} />
-      </label>
-      <button onClick={save}><Download size={16}/> Save 3D</button>
-    </div>
-  </div>;
+      <group ref={dustRef}>
+        <Dust />
+      </group>
+    </>
+  );
 }
+
+export default function ThreeRoll({ photos, look, caption, onSave }: Props) {
+  const [pull, setPull] = useState(62);
+  const [rotation, setRotation] = useState(0);
+  const lastXRef = useRef(0);
+  const colors = lookColors[look];
+  const panResponder = useMemo(
+    () => PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: (event) => {
+        lastXRef.current = event.nativeEvent.pageX;
+      },
+      onPanResponderMove: (event) => {
+        const x = event.nativeEvent.pageX;
+        const dx = x - lastXRef.current;
+        lastXRef.current = x;
+        setRotation((current) => current + dx * 0.008);
+      },
+    }),
+    [],
+  );
+
+  return (
+    <View style={styles.wrap}>
+      <View style={styles.canvas} {...panResponder.panHandlers}>
+        <Canvas shadows camera={{ position: [0.2, 2.0, 8.2], fov: 35 }}>
+          <FilmScene look={look} pull={pull} rotation={rotation} />
+        </Canvas>
+      </View>
+      <View style={styles.hud}>
+        <View style={styles.hudTextWrap}>
+          <Text style={styles.hudTitle}>{colors.label}</Text>
+          <Text style={styles.hudMeta}>{photos.length} frame reel / {caption || 'memory roll'}</Text>
+        </View>
+        <View style={styles.sliderRow}>
+          <Text style={styles.sliderLabel}>Pull film</Text>
+          <Slider
+            style={styles.slider}
+            minimumValue={18}
+            maximumValue={100}
+            value={pull}
+            minimumTrackTintColor={colors.labelColor}
+            maximumTrackTintColor="rgba(255,255,255,0.22)"
+            thumbTintColor={colors.labelColor}
+            onValueChange={setPull}
+          />
+        </View>
+        <Pressable style={styles.saveButton} onPress={onSave}>
+          <Download color="#190f05" size={16} />
+          <Text style={styles.saveText}>Save 3D</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  wrap: {
+    width: '100%',
+    aspectRatio: 0.72,
+    borderRadius: 28,
+    overflow: 'hidden',
+    backgroundColor: '#090806',
+  },
+  canvas: {
+    ...StyleSheet.absoluteFill,
+  },
+  hud: {
+    position: 'absolute',
+    left: 14,
+    right: 14,
+    bottom: 14,
+    borderRadius: 18,
+    padding: 12,
+    gap: 10,
+    backgroundColor: 'rgba(0,0,0,0.58)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+  },
+  hudTextWrap: {
+    gap: 2,
+  },
+  hudTitle: {
+    color: '#fff4e6',
+    fontSize: 13,
+    fontWeight: '900',
+    letterSpacing: 1,
+  },
+  hudMeta: {
+    color: 'rgba(255,244,230,0.68)',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  sliderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  sliderLabel: {
+    width: 72,
+    color: '#ffdf9e',
+    fontSize: 11,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  slider: {
+    flex: 1,
+    height: 34,
+  },
+  saveButton: {
+    height: 42,
+    borderRadius: 14,
+    backgroundColor: '#ffcf5d',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  saveText: {
+    color: '#190f05',
+    fontSize: 14,
+    fontWeight: '900',
+  },
+});

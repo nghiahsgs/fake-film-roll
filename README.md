@@ -1,43 +1,36 @@
 # Fake Film Roll
 
-A tiny viral-style web app that turns uploaded photos into a nostalgic 35mm film strip/contact-sheet image.
+A tiny Expo React Native app that turns camera shots or uploaded photos into nostalgic 35mm film frames.
 
 ## Features
 
-- Upload 3–12 photos
-- Film looks: Kodak Gold, Fuji Green, B&W 400TX, Disposable
-- Export sizes: Story, Square, Wide post
-- Canvas-rendered sprocket holes, frame numbers, grain, vignette, light leaks
-- Local-only rendering in the browser
-- PNG export
+- Take a photo with the device camera or pick up to 6 images
+- Film looks: Kodak summer, Tokyo night, Noir diary
+- Templates: Film stamp, 3D pull roll, fake roll, instant cover, film strip, contact sheet
+- Native React Native layouts for 2D exports
+- Three.js scene via `@react-three/fiber/native` and `expo-gl`
+- PNG export/share via `react-native-view-shot` and `expo-sharing`
 
 ## Run locally
 
 ```bash
 npm install
-npm run dev
+npm start
 ```
 
-Open the local Vite URL and upload photos.
+Open the project in Expo Go, an iOS simulator, an Android emulator, or a development build.
 
-## Build
+Useful scripts:
 
 ```bash
-npm run build
+npm run ios
+npm run android
+npm run web
+npm run typecheck
 ```
 
-## Suggested monetization
+## Notes
 
-- Free export with watermark
-- Pro: remove watermark, HD export, premium film packs, batch export
-- One-time purchase $2.99–$4.99 works well for this type of micro-app
-
-## GitHub
-
-If the repo exists on GitHub:
-
-```bash
-git remote add origin git@github.com:nghiahsgs/fake-film-roll.git
-git branch -M main
-git push -u origin main
-```
+- Rendering is local to the device.
+- The export button captures the preview surface and opens the native share sheet.
+- Current dependencies target Expo 56 / React Native 0.86.
